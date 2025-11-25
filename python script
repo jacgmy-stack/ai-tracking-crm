@@ -1,0 +1,43 @@
+import requests, datetime
+from bs4 import BeautifulSoup
+
+# Your MacroPoint link
+MACROPOINT_URL = "https://visibility.macropoint.com/shipments?l=LNK0aa1ebeb36774cf5b150ecf17fcadd58"
+
+# Example CRM API endpoint (replace with your CRM’s notes endpoint)
+CRM_API = "https://yourcrm.com/api/notes"
+CRM_TOKEN = "YOUR_API_KEY"
+
+def fetch_macro_data():
+    r = requests.get(MACROPOINT_URL)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # Example parsing logic (adjust selectors to match MacroPoint HTML)
+    location = soup.find("span", {"class": "location"}).text.strip()
+    status = soup.find("span", {"class": "status"}).text.strip()
+    miles_remaining = "425"  # placeholder until parsed
+    eta = "Tue 4:30 PM MST"  # placeholder until parsed
+
+    # Break status logic (simplified)
+    break_status = "10-hour break satisfied" if "break" in status.lower() else "Not on break"
+
+    note = f"""
+    [Update Timestamp: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}]
+    Status: {status}
+    Location: {location}
+    Break Status: {break_status}
+    Miles Remaining: {miles_remaining} mi
+    ETA: {eta}
+    Route Health: On Route
+    """
+    return note
+
+def update_crm(note):
+    payload = {"note": note, "load_id": "12345"}
+    headers = {"Authorization": f"Bearer {CRM_TOKEN}"}
+    r = requests.post(CRM_API, json=payload, headers=headers)
+    print("CRM update response:", r.status_code, r.text)
+
+if __name__ == "__main__":
+    note = fetch_macro_data()
+    update_crm(note)
