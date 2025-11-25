@@ -6,9 +6,9 @@ on:
     - cron: "30 12 * * *"
     # 12:00 PM MST = 19:00 UTC
     - cron: "0 19 * * *"
-    # 6:00 PM MST = 1:00 UTC (next day)
+    # 6:00 PM MST = 1:00 UTC (next day UTC)
     - cron: "0 1 * * *"
-  workflow_dispatch:
+  workflow_dispatch:   # allows manual runs from the Actions tab
 
 jobs:
   track:
@@ -26,4 +26,6 @@ jobs:
         run: pip install requests beautifulsoup4
 
       - name: Run tracking script
+        env:
+          CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
         run: python tracking.py
