@@ -1,43 +1,93 @@
-import requests, datetime
+import requests, datetime, os
 from bs4 import BeautifulSoup
+from math import radians, cos, sin, asin, sqrt
 
-# Your MacroPoint link
-MACROPOINT_URL = "https://visibility.macropoint.com/shipments?l=LNK0aa1ebeb36774cf5b150ecf17fcadd58"
-
-# Example CRM API endpoint (replace with your CRM’s notes endpoint)
+# CRM API details
 CRM_API = "https://yourcrm.com/api/notes"
-CRM_TOKEN = "YOUR_API_KEY"
+CRM_LOADS_API = "https://yourcrm.com/api/loads?status=active"
+CRM_TOKEN = os.getenv("CRM_TOKEN")  # stored securely in GitHub Secrets
 
-def fetch_macro_data():
-    r = requests.get(MACROPOINT_URL)
+# Out-of-route threshold (miles)
+OUT_OF_ROUTE_THRESHOLD = 10
+
+def haversine(lat1, lon1, lat2, lon2):
+    """Calculate great-circle distance in miles between two coordinates."""
+    R = 3956  # Earth radius in miles
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+    return 2 * R * asin(sqrt(a))
+
+def get_active_loads():
+    """Fetch active loads with MacroPoint links from CRM."""
+    headers = {"Authorization": f"Bearer {CRM_TOKEN}"}
+    r = requests.get(CRM_LOADS_API, headers=headers)
+    loads = r.json()
+    return [(load["id"], load["macro_link"], load.get("baseline_route")) 
+            for load in loads if "macro_link" in load]
+
+def fetch_macro_data(url):
+    """Scrape MacroPoint link for driver status and location."""
+    r = requests.get(url)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # Example parsing logic (adjust selectors to match MacroPoint HTML)
-    location = soup.find("span", {"class": "location"}).text.strip()
+    # Example selectors (adjust to match MacroPoint HTML)
     status = soup.find("span", {"class": "status"}).text.strip()
-    miles_remaining = "425"  # placeholder until parsed
-    eta = "Tue 4:30 PM MST"  # placeholder until parsed
+    location = soup.find("span", {"class": "location"}).text.strip()
+    lat = float(soup.find("meta", {"name": "latitude"})["content"])
+    lon = float(soup.find("meta", {"name": "longitude"})["content"])
 
-    # Break status logic (simplified)
+    # Break status heuristic
     break_status = "10-hour break satisfied" if "break" in status.lower() else "Not on break"
 
-    note = f"""
-    [Update Timestamp: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}]
-    Status: {status}
-    Location: {location}
-    Break Status: {break_status}
-    Miles Remaining: {miles_remaining} mi
-    ETA: {eta}
-    Route Health: On Route
-    """
-    return note
+    # Placeholder miles/ETA (replace with route logic)
+    miles_remaining = 425
+    eta = "Tue 4:30 PM MST"
 
-def update_crm(note):
-    payload = {"note": note, "load_id": "12345"}
+    return {
+        "status": status,
+        "location": location,
+        "lat": lat,
+        "lon": lon,
+        "break_status": break_status,
+        "miles_remaining": miles_remaining,
+        "eta": eta
+    }
+
+def check_out_of_route(current_lat, current_lon, baseline_route):
+    """Check if driver is out of route compared to baseline polyline."""
+    if not baseline_route:
+        return None
+    # baseline_route is expected as list of (lat, lon) points
+    deviations = [haversine(current_lat, current_lon, lat, lon) for lat, lon in baseline_route]
+    min_dev = min(deviations)
+    return min_dev if min_dev > OUT_OF_ROUTE_THRESHOLD else None
+
+def format_note(data, deviation=None):
+    """Format note for CRM Internal Notes."""
+    timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    note = f"""
+    [Update Timestamp: {timestamp}]
+    Status: {data['status']}
+    Location: {data['location']}
+    Break Status: {data['break_status']}
+    Miles Remaining: {data['miles_remaining']} mi
+    ETA: {data['eta']}
+    Route Health: {"Out of Route (+%.1f mi)" % deviation if deviation else "On Route"}
+    """
+    return note.strip()
+
+def update_crm(note, load_id):
+    """Post note into CRM Internal Notes for given load."""
+    payload = {"note": note, "load_id": load_id}
     headers = {"Authorization": f"Bearer {CRM_TOKEN}"}
     r = requests.post(CRM_API, json=payload, headers=headers)
-    print("CRM update response:", r.status_code, r.text)
+    print(f"CRM update for load {load_id}: {r.status_code}")
 
 if __name__ == "__main__":
-    note = fetch_macro_data()
-    update_crm(note)
+    loads = get_active_loads()
+    for load_id, macro_url, baseline_route in loads:
+        data = fetch_macro_data(macro_url)
+        deviation = check_out_of_route(data["lat"], data["lon"], baseline_route)
+        note = format_note(data, deviation)
+        update_crm(note, load_id)
